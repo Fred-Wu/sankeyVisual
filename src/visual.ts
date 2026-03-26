@@ -97,9 +97,20 @@ type DragBounds = {
     bottom: number;
 };
 
+type Point = {
+    x: number;
+    y: number;
+};
+
 type NodePosition = {
     x?: number;
     y?: number;
+};
+
+type ZoomState = {
+    scale: number;
+    translateX: number;
+    translateY: number;
 };
 
 type SyncedSelectionState = {
@@ -125,6 +136,9 @@ type RgbColor = { r: number; g: number; b: number };
 const allNodesFormatKey = "__all_nodes__";
 const noNodeSelectionFormatKey = "__no_node_selection__";
 const defaultLinkOpacity = 45;
+const minZoomScale = 1;
+const maxZoomScale = 5;
+const wheelZoomSensitivity = 0.0015;
 const defaultNodeStyle: PersistedStyle = {
     color: "#4e79a7",
     opacity: 90,
@@ -246,6 +260,13 @@ export class Visual implements IVisual {
     private hoveredLinkKey?: string;
     private pendingSelectedNodeName?: string;
     private pendingClearSelection: boolean = false;
+    private currentViewport?: IViewport;
+    private currentGraphViewport?: SVGGElement;
+    private zoomState: ZoomState = {
+        scale: minZoomScale,
+        translateX: 0,
+        translateY: 0,
+    };
 
     constructor(options: VisualConstructorOptions) {
         this.host = options.host;
@@ -283,6 +304,16 @@ export class Visual implements IVisual {
         this.svg.addEventListener("contextmenu", (event: MouseEvent) => {
             event.preventDefault();
             this.showContextMenu(undefined, event);
+        });
+        this.svg.addEventListener("wheel", (event: WheelEvent) => {
+            this.handleWheelZoom(event);
+        }, { passive: false });
+        this.svg.addEventListener("pointerdown", (event: PointerEvent) => {
+            if (event.target !== this.svg) {
+                return;
+            }
+
+            this.startViewportPan(event);
         });
 
         this.surface.appendChild(this.svg);
@@ -583,11 +614,13 @@ export class Visual implements IVisual {
         nodePositionMap: NodePositionMap,
         selectedNodeName?: string,
     ): void {
+        this.currentViewport = viewport;
         this.surface.style.width = `${viewport.width}px`;
         this.surface.style.height = `${viewport.height}px`;
         this.hoveredLinkKey = undefined;
         this.hideTooltip();
         this.svg.replaceChildren();
+        this.currentGraphViewport = undefined;
 
         setAttributes(this.svg, {
             width: viewport.width,
@@ -596,6 +629,8 @@ export class Visual implements IVisual {
             role: "img",
             "aria-label": "Sankey diagram",
         });
+        this.normalizeZoomState(viewport);
+        this.applyGraphViewportTransform();
 
         if (viewport.width < 180 || viewport.height < 140) {
             this.renderMessage("Resize the visual to render the Sankey diagram.");
@@ -647,25 +682,31 @@ export class Visual implements IVisual {
         this.applyPersistedNodePositions(sankeyGraph, nodePositionMap, dragBounds);
         sankeyLayout.update(sankeyGraph);
 
+        const graphViewport = createSvgElement("g");
+        graphViewport.classList.add("sankey-graph-viewport");
+        this.svg.appendChild(graphViewport);
+        this.currentGraphViewport = graphViewport;
+        this.applyGraphViewportTransform();
+
         const linkGroup = createSvgElement("g");
         linkGroup.classList.add("sankey-links");
-        this.svg.appendChild(linkGroup);
+        graphViewport.appendChild(linkGroup);
 
         const linkLabelGroup = createSvgElement("g");
         linkLabelGroup.classList.add("sankey-link-labels");
-        this.svg.appendChild(linkLabelGroup);
+        graphViewport.appendChild(linkLabelGroup);
 
         const selectionGroup = createSvgElement("g");
         selectionGroup.classList.add("sankey-node-selection");
-        this.svg.appendChild(selectionGroup);
+        graphViewport.appendChild(selectionGroup);
 
         const nodeGroup = createSvgElement("g");
         nodeGroup.classList.add("sankey-nodes");
-        this.svg.appendChild(nodeGroup);
+        graphViewport.appendChild(nodeGroup);
 
         const labelGroup = createSvgElement("g");
         labelGroup.classList.add("sankey-labels");
-        this.svg.appendChild(labelGroup);
+        graphViewport.appendChild(labelGroup);
 
         const linkPathGenerator = sankeyLinkHorizontal<VisualNode, VisualLink>();
         const linkElements: Array<{ link: GraphLink; path: SVGPathElement; label?: SVGTextElement }> = [];
@@ -928,6 +969,161 @@ export class Visual implements IVisual {
         this.svg.appendChild(messageGroup);
     }
 
+    private handleWheelZoom(event: WheelEvent): void {
+        if (!this.currentGraphViewport || !this.currentViewport) {
+            return;
+        }
+
+        if (!(event.ctrlKey || event.metaKey)) {
+            return;
+        }
+
+        event.preventDefault();
+        event.stopPropagation();
+        this.hideTooltip();
+
+        const nextScale = clamp(
+            this.zoomState.scale * Math.exp(-event.deltaY * wheelZoomSensitivity),
+            minZoomScale,
+            maxZoomScale,
+        );
+        this.zoomTo(nextScale, event.clientX, event.clientY);
+    }
+
+    private startViewportPan(event: PointerEvent): void {
+        if (
+            event.button !== 0
+            || !this.currentViewport
+            || !this.currentGraphViewport
+            || this.zoomState.scale <= minZoomScale
+        ) {
+            return;
+        }
+
+        event.preventDefault();
+        this.hideTooltip();
+
+        const startClientX = event.clientX;
+        const startClientY = event.clientY;
+        const startTranslateX = this.zoomState.translateX;
+        const startTranslateY = this.zoomState.translateY;
+        let moved = false;
+
+        this.svg.classList.add("is-panning");
+        this.svg.setPointerCapture(event.pointerId);
+
+        const handlePointerMove = (moveEvent: PointerEvent): void => {
+            const deltaX = moveEvent.clientX - startClientX;
+            const deltaY = moveEvent.clientY - startClientY;
+
+            if (!moved && Math.max(Math.abs(deltaX), Math.abs(deltaY)) < dragStartThreshold) {
+                return;
+            }
+
+            moved = true;
+            this.zoomState.translateX = startTranslateX + deltaX;
+            this.zoomState.translateY = startTranslateY + deltaY;
+            this.normalizeZoomState(this.currentViewport!);
+            this.applyGraphViewportTransform();
+        };
+
+        const finishPan = (): void => {
+            this.svg.classList.remove("is-panning");
+
+            if (this.svg.hasPointerCapture(event.pointerId)) {
+                this.svg.releasePointerCapture(event.pointerId);
+            }
+
+            this.svg.removeEventListener("pointermove", handlePointerMove);
+            this.svg.removeEventListener("pointerup", handlePointerUp);
+            this.svg.removeEventListener("pointercancel", handlePointerCancel);
+
+            if (moved) {
+                this.suppressClickSelection = true;
+            }
+        };
+
+        const handlePointerUp = (): void => {
+            finishPan();
+        };
+
+        const handlePointerCancel = (): void => {
+            finishPan();
+        };
+
+        this.svg.addEventListener("pointermove", handlePointerMove);
+        this.svg.addEventListener("pointerup", handlePointerUp);
+        this.svg.addEventListener("pointercancel", handlePointerCancel);
+    }
+
+    private getSvgPointFromClient(clientX: number, clientY: number): Point {
+        const svgBounds = this.svg.getBoundingClientRect();
+        return {
+            x: clientX - svgBounds.left,
+            y: clientY - svgBounds.top,
+        };
+    }
+
+    private getGraphPointFromClient(clientX: number, clientY: number): Point {
+        const svgPoint = this.getSvgPointFromClient(clientX, clientY);
+        return {
+            x: (svgPoint.x - this.zoomState.translateX) / this.zoomState.scale,
+            y: (svgPoint.y - this.zoomState.translateY) / this.zoomState.scale,
+        };
+    }
+
+    private zoomTo(nextScale: number, clientX: number, clientY: number): void {
+        if (!this.currentGraphViewport || !this.currentViewport) {
+            return;
+        }
+
+        const normalizedScale = clamp(nextScale, minZoomScale, maxZoomScale);
+        if (Math.abs(normalizedScale - this.zoomState.scale) < 0.001) {
+            return;
+        }
+
+        const svgPoint = this.getSvgPointFromClient(clientX, clientY);
+        const graphX = (svgPoint.x - this.zoomState.translateX) / this.zoomState.scale;
+        const graphY = (svgPoint.y - this.zoomState.translateY) / this.zoomState.scale;
+
+        this.zoomState.scale = normalizedScale;
+        this.zoomState.translateX = svgPoint.x - (graphX * normalizedScale);
+        this.zoomState.translateY = svgPoint.y - (graphY * normalizedScale);
+        this.normalizeZoomState(this.currentViewport);
+        this.applyGraphViewportTransform();
+    }
+
+    private normalizeZoomState(viewport: IViewport): void {
+        this.zoomState.scale = clamp(this.zoomState.scale, minZoomScale, maxZoomScale);
+
+        if (this.zoomState.scale <= minZoomScale + 0.001) {
+            this.zoomState.scale = minZoomScale;
+            this.zoomState.translateX = 0;
+            this.zoomState.translateY = 0;
+            return;
+        }
+
+        const minTranslateX = viewport.width - (viewport.width * this.zoomState.scale);
+        const minTranslateY = viewport.height - (viewport.height * this.zoomState.scale);
+
+        this.zoomState.translateX = clamp(this.zoomState.translateX, minTranslateX, 0);
+        this.zoomState.translateY = clamp(this.zoomState.translateY, minTranslateY, 0);
+    }
+
+    private applyGraphViewportTransform(): void {
+        if (this.currentGraphViewport) {
+            setAttributes(this.currentGraphViewport, {
+                transform: `matrix(${this.zoomState.scale} 0 0 ${this.zoomState.scale} ${this.zoomState.translateX} ${this.zoomState.translateY})`,
+            });
+        }
+
+        const isPannable = Boolean(this.currentGraphViewport) && this.zoomState.scale > minZoomScale + 0.001;
+        this.svg.classList.toggle("is-pannable", isPannable);
+        if (!isPannable) {
+            this.svg.classList.remove("is-panning");
+        }
+    }
+
     private startNodeDrag(
         event: PointerEvent,
         rect: SVGRectElement,
@@ -947,9 +1143,9 @@ export class Visual implements IVisual {
 
         const startClientY = event.clientY;
         const startClientX = event.clientX;
-        const svgBounds = this.svg.getBoundingClientRect();
-        const pointerOffsetX = startClientX - svgBounds.left - (node.x0 || dragBounds.left);
-        const pointerOffsetY = startClientY - svgBounds.top - (node.y0 || dragBounds.top);
+        const startGraphPoint = this.getGraphPointFromClient(startClientX, startClientY);
+        const pointerOffsetX = startGraphPoint.x - (node.x0 || dragBounds.left);
+        const pointerOffsetY = startGraphPoint.y - (node.y0 || dragBounds.top);
         let moved = false;
         let animationFrameId: number | undefined;
 
@@ -982,10 +1178,9 @@ export class Visual implements IVisual {
 
             const nodeWidth = Math.max(1, (node.x1 || 0) - (node.x0 || 0));
             const nodeHeight = Math.max(1, (node.y1 || 0) - (node.y0 || 0));
-            const pointerX = moveEvent.clientX - svgBounds.left;
-            const pointerY = moveEvent.clientY - svgBounds.top;
-            const desiredX0 = clamp(pointerX - pointerOffsetX, dragBounds.left, dragBounds.right - nodeWidth);
-            const desiredY0 = clamp(pointerY - pointerOffsetY, dragBounds.top, dragBounds.bottom - nodeHeight);
+            const pointerPoint = this.getGraphPointFromClient(moveEvent.clientX, moveEvent.clientY);
+            const desiredX0 = clamp(pointerPoint.x - pointerOffsetX, dragBounds.left, dragBounds.right - nodeWidth);
+            const desiredY0 = clamp(pointerPoint.y - pointerOffsetY, dragBounds.top, dragBounds.bottom - nodeHeight);
 
             node.x0 = desiredX0;
             node.x1 = desiredX0 + nodeWidth;
