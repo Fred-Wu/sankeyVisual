@@ -1,0 +1,103 @@
+.sankey-root {
+    width: 100%;
+    height: 100%;
+    font-family: "Segoe UI", Tahoma, sans-serif;
+}
+
+.sankey-surface {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+}
+
+.sankey-svg {
+    display: block;
+    width: 100%;
+    height: 100%;
+}
+
+.sankey-link {
+    cursor: pointer;
+    transition: stroke 120ms ease, stroke-opacity 120ms ease;
+}
+
+.sankey-node {
+    cursor: grab;
+    touch-action: none;
+    transition: opacity 120ms ease, stroke-width 120ms ease;
+}
+
+.sankey-node:hover {
+    opacity: 1;
+}
+
+.sankey-node.is-dragging {
+    cursor: grabbing;
+}
+
+.sankey-node-outline {
+    pointer-events: none;
+}
+
+.sankey-label {
+    pointer-events: none;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+}
+
+.sankey-link-label {
+    pointer-events: none;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+}
+
+.sankey-overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    padding: 12px 14px;
+    pointer-events: none;
+}
+
+.sankey-warning {
+    max-width: min(100%, 560px);
+    border-radius: 999px;
+    padding: 6px 10px;
+    font-size: 11px;
+    line-height: 1.4;
+    color: #334155;
+    background: rgba(255, 255, 255, 0.88);
+    box-shadow: 0 4px 14px rgba(15, 23, 42, 0.08);
+}
+
+.sankey-hover-tooltip {
+    position: absolute;
+    z-index: 2;
+    max-width: min(360px, calc(100% - 24px));
+    padding: 10px 12px;
+    border-radius: 12px;
+    font-size: 13px;
+    line-height: 1.45;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    box-shadow: 0 10px 26px rgba(15, 23, 42, 0.18);
+    pointer-events: none;
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 90ms ease;
+}
+
+.sankey-hover-tooltip.is-visible {
+    opacity: 1;
+    visibility: visible;
+}
+
+.sankey-warning {
+    visibility: hidden;
+}
+
+.sankey-warning.is-visible {
+    visibility: visible;
+}

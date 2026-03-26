@@ -1,0 +1,26 @@
+{
+    "visual": {
+        "name": "certifiedSankeyVisual",
+        "displayName": "Certified Sankey Visual",
+        "guid": "certifiedSankeyVisual547C5E4DCB3A4FB09BCB3C955066110B",
+        "visualClassName": "Visual",
+        "version": "1.0.0.0",
+        "description": "Certification-oriented Sankey custom visual for Power BI using Source->Target pairs and numeric Values.",
+        "supportUrl": "https://example.com/replace-with-real-support-url",
+        "gitHubUrl": "https://example.com/replace-with-real-source-url"
+    },
+    "apiVersion": "5.11.0",
+    "author": {
+        "name": "MHLL",
+        "email": "replace-with-real-support@example.com"
+    },
+    "assets": {
+        "icon": "assets/icon.png"
+    },
+    "externalJS": null,
+    "style": "style/visual.less",
+    "capabilities": "capabilities.json",
+    "dependencies": null,
+    "stringResources": [],
+    "version": "1.0.0.0"
+}

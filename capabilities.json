@@ -1,0 +1,252 @@
+{
+    "dataRoles": [
+        {
+            "name": "pairs",
+            "kind": "Grouping",
+            "displayName": "Source->Target Pair(s)"
+        },
+        {
+            "name": "values",
+            "kind": "Measure",
+            "displayName": "Values",
+            "requiredTypes": [
+                {
+                    "numeric": true
+                }
+            ]
+        }
+    ],
+    "dataViewMappings": [
+        {
+            "conditions": [
+                {
+                    "values": {
+                        "max": 1
+                    }
+                }
+            ],
+            "categorical": {
+                "categories": {
+                    "select": [
+                        {
+                            "for": {
+                                "in": "pairs"
+                            }
+                        }
+                    ],
+                    "dataReductionAlgorithm": {
+                        "top": {}
+                    }
+                },
+                "values": {
+                    "select": [
+                        {
+                            "bind": {
+                                "to": "values"
+                            }
+                        }
+                    ]
+                }
+            }
+        }
+    ],
+    "objects": {
+        "layout": {
+            "properties": {
+                "nodeWidth": {
+                    "type": {
+                        "numeric": true
+                    }
+                },
+                "nodePadding": {
+                    "type": {
+                        "numeric": true
+                    }
+                }
+            }
+        },
+        "labels": {
+            "properties": {
+                "show": {
+                    "type": {
+                        "bool": true
+                    }
+                },
+                "showText": {
+                    "type": {
+                        "bool": true
+                    }
+                },
+                "showValue": {
+                    "type": {
+                        "bool": true
+                    }
+                },
+                "fontSize": {
+                    "type": {
+                        "formatting": {
+                            "fontSize": true
+                        }
+                    }
+                },
+                "fill": {
+                    "type": {
+                        "fill": {
+                            "solid": {
+                                "color": true
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "linkLabels": {
+            "properties": {
+                "show": {
+                    "type": {
+                        "bool": true
+                    }
+                },
+                "showText": {
+                    "type": {
+                        "bool": true
+                    }
+                },
+                "showValue": {
+                    "type": {
+                        "bool": true
+                    }
+                },
+                "fontSize": {
+                    "type": {
+                        "formatting": {
+                            "fontSize": true
+                        }
+                    }
+                },
+                "fill": {
+                    "type": {
+                        "fill": {
+                            "solid": {
+                                "color": true
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "valueFormatting": {
+            "properties": {
+                "showAsPercentage": {
+                    "type": {
+                        "bool": true
+                    }
+                },
+                "decimalPlaces": {
+                    "type": {
+                        "numeric": true
+                    }
+                }
+            }
+        },
+        "defaultNodes": {
+            "properties": {
+                "targetName": {
+                    "type": {
+                        "text": true
+                    }
+                },
+                "useThemePalette": {
+                    "type": {
+                        "bool": true
+                    }
+                },
+                "paletteMode": {
+                    "type": {
+                        "enumeration": [
+                            {
+                                "displayName": "Single color",
+                                "value": "singleColor"
+                            },
+                            {
+                                "displayName": "Tableau",
+                                "value": "tableau"
+                            },
+                            {
+                                "displayName": "Okabe-Ito",
+                                "value": "okabeIto"
+                            },
+                            {
+                                "displayName": "Soft modern",
+                                "value": "softModern"
+                            },
+                            {
+                                "displayName": "Muted executive",
+                                "value": "mutedExecutive"
+                            },
+                            {
+                                "displayName": "IBM Carbon",
+                                "value": "ibmCarbon"
+                            }
+                        ]
+                    }
+                },
+                "fill": {
+                    "type": {
+                        "fill": {
+                            "solid": {
+                                "color": true
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "persistedState": {
+            "properties": {
+                "selectedNodeName": {
+                    "type": {
+                        "text": true
+                    }
+                },
+                "selectedLinkName": {
+                    "type": {
+                        "text": true
+                    }
+                },
+                "nodeStyleMap": {
+                    "type": {
+                        "text": true
+                    }
+                },
+                "linkStyleMap": {
+                    "type": {
+                        "text": true
+                    }
+                },
+                "nodePositionMap": {
+                    "type": {
+                        "text": true
+                    }
+                },
+                "nodeGlobalStyle": {
+                    "type": {
+                        "text": true
+                    }
+                },
+                "nodeFormatSyncState": {
+                    "type": {
+                        "text": true
+                    }
+                },
+                "linkFormatSyncState": {
+                    "type": {
+                        "text": true
+                    }
+                }
+            }
+        }
+    },
+    "supportsMultiVisualSelection": true,
+    "privileges": []
+}
