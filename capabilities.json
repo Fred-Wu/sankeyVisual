@@ -35,7 +35,9 @@
                         }
                     ],
                     "dataReductionAlgorithm": {
-                        "top": {}
+                        "top": {
+                            "count": 30000
+                        }
                     }
                 },
                 "values": {
@@ -247,6 +249,16 @@
             }
         }
     },
+    "tooltips": {
+        "supportedTypes": {
+            "default": true,
+            "canvas": true
+        },
+        "supportEnhancedTooltips": true
+    },
+    "supportsKeyboardFocus": true,
+    "supportsLandingPage": true,
+    "supportsEmptyDataView": true,
     "supportsMultiVisualSelection": true,
     "privileges": []
 }

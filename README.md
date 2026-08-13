@@ -1,6 +1,6 @@
-# Certified Sankey Visual
+# Sankey Flow
 
-Custom Power BI Sankey visual focused on a clean interaction model and AppSource/certification-oriented implementation.
+Interactive Power BI Sankey visual focused on a clean interaction model and AppSource-ready implementation.
 
 ## Current implementation
 
@@ -11,7 +11,12 @@ Custom Power BI Sankey visual focused on a clean interaction model and AppSource
 - Persists node positions after drag and reapplies them on refresh.
 - Supports Power BI cross-visual selection through `ISelectionManager` and row-backed `ISelectionId`s.
 - Supports Power BI context menus on both data points and empty space.
+- Uses the Power BI host tooltip service for nodes and links.
+- Supports keyboard focus for nodes and links with `Enter`/`Space` activation and keyboard context menus.
+- Shows a landing page when no data fields are bound.
 - Shows inline warnings when rows are skipped because values are invalid or pair strings cannot be parsed.
+- Requests up to 30,000 rows, aggregates repeated flows, and renders the top 1,000 aggregated flows when necessary to protect report performance.
+- Uses the semantic model's measure and category format strings and the Power BI host locale.
 
 ## Data roles
 
@@ -52,7 +57,9 @@ A -> B; B -> D
 ### Value Format
 
 - `Show as percentage`
-- `Decimal places`
+- `Percentage decimal places` (shown when `Show as percentage` is enabled)
+
+When percentage display is disabled, labels, tooltips, and accessibility text use the Values measure's semantic-model format string.
 
 ### Node Format
 
@@ -82,7 +89,8 @@ Behavior:
 - Right-click a node or link to open the Power BI data-point context menu.
 - Right-click empty space to open the general Power BI context menu.
 - Drag nodes to reposition them inside the plot area.
-- Hover nodes and links to see the visual's custom tooltip.
+- Hover or focus nodes and links to see the Power BI host tooltip.
+- Press `Tab` to move across links and nodes, `Enter` or `Space` to select, and `Shift+F10` or the context-menu key to open the context menu.
 
 ## Styling notes
 
@@ -105,22 +113,24 @@ npm run package
 
 ## Publication and certification status
 
-The codebase now includes several certification-oriented pieces:
+The codebase now includes several certification-readiness features:
 
 - `apiVersion` `5.11.0`
+- locally pinned `powerbi-visuals-tools` `7.2.1`
+- `powerbi-visuals-api` package `5.11.1`
 - no declared privileges
 - Power BI selection manager integration
 - empty-space and data-point context menus
 - cross-visual selection support
-- clean `npm audit` result through the current dependency overrides
+- Power BI host tooltip integration
+- keyboard-focus support through `supportsKeyboardFocus`
+- landing-page support through `supportsLandingPage` and `supportsEmptyDataView`
+- clean moderate-and-higher `npm audit` result through the current dependency overrides
+- successful `pbiviz package --certification-audit`
 
 Still required before Microsoft submission:
 
-- replace placeholder metadata in `pbiviz.json`
-  - `supportUrl`
-  - `gitHubUrl`
-  - author support email
-- publish the real source repository and maintain the `certification` branch
+- replace the `author.email` value in `pbiviz.json` with a monitored support mailbox before submission
 - prepare AppSource submission assets
   - offline sample `.pbix`
   - screenshots
@@ -131,7 +141,4 @@ Still required before Microsoft submission:
 - address remaining recommended submission gaps if targeting a stronger review outcome
   - allow interactions
   - highlight data
-  - keyboard navigation
-  - landing page
   - localization
-  - official tooltip integration

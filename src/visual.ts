@@ -29,6 +29,7 @@ import powerbi from "powerbi-visuals-api";
 import { sankey, sankeyLinkHorizontal } from "d3-sankey";
 import type { SankeyGraph, SankeyLayout } from "d3-sankey";
 import { FormattingSettingsService } from "powerbi-visuals-utils-formattingmodel";
+import { valueFormatter } from "powerbi-visuals-utils-formattingutils";
 import "./../style/visual.less";
 
 import IVisual = powerbi.extensibility.visual.IVisual;
@@ -132,6 +133,13 @@ type GraphNode = SankeyGraph<VisualNode, VisualLink>["nodes"][number];
 type GraphLink = SankeyGraph<VisualNode, VisualLink>["links"][number];
 type SankeyGenerator = SankeyLayout<SankeyGraph<VisualNode, VisualLink>, VisualNode, VisualLink>;
 type RgbColor = { r: number; g: number; b: number };
+type TooltipItem = {
+    displayName: string;
+    value: string;
+    color?: string;
+    header?: string;
+    opacity?: string;
+};
 
 const allNodesFormatKey = "__all_nodes__";
 const noNodeSelectionFormatKey = "__no_node_selection__";
@@ -152,16 +160,6 @@ function setAttributes(element: Element, attributes: Record<string, string | num
     Object.keys(attributes).forEach((key: string) => {
         element.setAttribute(key, String(attributes[key]));
     });
-}
-
-function formatValueWithOptions(value: number, decimalPlaces: number, showAsPercentage: boolean): string {
-    const normalizedDecimalPlaces = Math.max(0, Math.min(6, Math.round(decimalPlaces)));
-
-    return new Intl.NumberFormat(undefined, {
-        style: showAsPercentage ? "percent" : "decimal",
-        minimumFractionDigits: normalizedDecimalPlaces,
-        maximumFractionDigits: normalizedDecimalPlaces,
-    }).format(value);
 }
 
 function alignByInputOrder(node: VisualNode, maxDepth: number): number {
@@ -221,16 +219,6 @@ function mixWithWhite(color: string, intensity: number): string {
     });
 }
 
-function getContrastTextColor(backgroundColor: string): string {
-    const parsedColor = parseColor(backgroundColor);
-    if (!parsedColor) {
-        return "#ffffff";
-    }
-
-    const brightness = ((parsedColor.r * 299) + (parsedColor.g * 587) + (parsedColor.b * 114)) / 1000;
-    return brightness >= 160 ? "#0f172a" : "#ffffff";
-}
-
 function clampNodeToBounds(node: GraphNode, bounds: DragBounds): void {
     const nodeWidth = Math.max(1, (node.x1 || bounds.left) - (node.x0 || bounds.left));
     const nodeHeight = Math.max(1, (node.y1 || bounds.top) - (node.y0 || bounds.top));
@@ -251,13 +239,16 @@ export class Visual implements IVisual {
     private readonly surface: HTMLDivElement;
     private readonly svg: SVGSVGElement;
     private readonly overlay: HTMLDivElement;
-    private readonly hoverTooltip: HTMLDivElement;
+    private readonly landingPage: HTMLDivElement;
     private readonly warning: HTMLDivElement;
     private readonly formattingSettingsService: FormattingSettingsService;
 
     private formattingSettings: VisualFormattingSettingsModel;
+    private modelValueFormatter: valueFormatter.IValueFormatter;
+    private percentageValueFormatter: valueFormatter.IValueFormatter;
     private suppressClickSelection: boolean = false;
     private hoveredLinkKey?: string;
+    private focusedNodeId?: string;
     private pendingSelectedNodeName?: string;
     private pendingClearSelection: boolean = false;
     private currentViewport?: IViewport;
@@ -273,6 +264,14 @@ export class Visual implements IVisual {
         this.events = options.host.eventService;
         this.selectionManager = this.host.createSelectionManager();
         this.formattingSettingsService = new FormattingSettingsService();
+        this.modelValueFormatter = valueFormatter.create({
+            cultureSelector: this.host.locale,
+        });
+        this.percentageValueFormatter = valueFormatter.create({
+            format: "0%",
+            precision: 2,
+            cultureSelector: this.host.locale,
+        });
 
         this.root = document.createElement("div");
         this.root.className = "sankey-root";
@@ -286,12 +285,29 @@ export class Visual implements IVisual {
         this.overlay = document.createElement("div");
         this.overlay.className = "sankey-overlay";
 
-        this.hoverTooltip = document.createElement("div");
-        this.hoverTooltip.className = "sankey-hover-tooltip";
+        this.landingPage = document.createElement("div");
+        this.landingPage.className = "sankey-landing";
+
+        const landingTitle = document.createElement("div");
+        landingTitle.className = "sankey-landing-title";
+        landingTitle.textContent = "Build a Sankey from source and target pairs";
+
+        const landingBody = document.createElement("div");
+        landingBody.className = "sankey-landing-body";
+        landingBody.textContent = "Add one or more Source->Target Pair(s) fields and a single Values measure.";
+
+        const landingHint = document.createElement("div");
+        landingHint.className = "sankey-landing-hint";
+        landingHint.textContent = "Examples: A -> B, A -> B, C, or A -> B; B -> D";
+
+        this.landingPage.appendChild(landingTitle);
+        this.landingPage.appendChild(landingBody);
+        this.landingPage.appendChild(landingHint);
 
         this.warning = document.createElement("div");
         this.warning.className = "sankey-warning";
 
+        this.overlay.appendChild(this.landingPage);
         this.overlay.appendChild(this.warning);
         this.svg.addEventListener("click", () => {
             if (this.suppressClickSelection) {
@@ -318,7 +334,6 @@ export class Visual implements IVisual {
 
         this.surface.appendChild(this.svg);
         this.surface.appendChild(this.overlay);
-        this.surface.appendChild(this.hoverTooltip);
         this.root.appendChild(this.surface);
         options.element.appendChild(this.root);
     }
@@ -333,6 +348,7 @@ export class Visual implements IVisual {
                 VisualFormattingSettingsModel,
                 dataView,
             );
+            this.configureValueFormatters(dataView);
 
             const nodeStyleMap = parseStyleMap(this.formattingSettings.persistedState.nodeStyleMap.value);
             const linkStyleMap = parseStyleMap(this.formattingSettings.persistedState.linkStyleMap.value);
@@ -345,6 +361,7 @@ export class Visual implements IVisual {
             const linkFormatSyncState = this.parseSelectionSyncState(this.formattingSettings.persistedState.linkFormatSyncState.value);
             const persistedSelectedNodeName = this.formattingSettings.persistedState.selectedNodeName.value.trim();
             const selectedLinkLabel = this.formattingSettings.persistedState.selectedLinkName.value.trim();
+            const hasAssignedFields = Boolean(dataView?.metadata?.columns?.length);
 
             const styleContext = this.buildAppliedStyleContext(nodeStyleMap, nodeGlobalStyle);
             const visualData = buildSankeyData(
@@ -352,6 +369,7 @@ export class Visual implements IVisual {
                 this.host.colorPalette,
                 styleContext,
                 this.host.createSelectionIdBuilder.bind(this.host),
+                this.host.locale,
             );
 
             const activeNodeTargetName = this.getActiveNodeTargetName(
@@ -393,6 +411,7 @@ export class Visual implements IVisual {
                 options.viewport,
                 visualData,
                 nodePositionMap,
+                hasAssignedFields,
                 activeNodeTargetName,
             );
 
@@ -429,6 +448,27 @@ export class Visual implements IVisual {
             highContrastForeground: colorPalette.foreground.value,
             highContrastBackground: colorPalette.background.value,
         };
+    }
+
+    private configureValueFormatters(dataView: powerbi.DataView | undefined): void {
+        const valueColumn = dataView?.metadata?.columns?.find(
+            (column: powerbi.DataViewMetadataColumn) => column.roles?.values,
+        );
+        const decimalPlaces = Math.max(
+            0,
+            Math.min(6, Math.round(this.formattingSettings.valueFormatting.decimalPlaces.value)),
+        );
+
+        this.modelValueFormatter = valueFormatter.create({
+            format: valueColumn?.format,
+            columnType: valueColumn?.type,
+            cultureSelector: this.host.locale,
+        });
+        this.percentageValueFormatter = valueFormatter.create({
+            format: "0%",
+            precision: decimalPlaces,
+            cultureSelector: this.host.locale,
+        });
     }
 
     private syncPersistedStyles(
@@ -612,13 +652,16 @@ export class Visual implements IVisual {
         viewport: IViewport,
         visualData: SankeyVisualData,
         nodePositionMap: NodePositionMap,
+        hasAssignedFields: boolean,
         selectedNodeName?: string,
     ): void {
         this.currentViewport = viewport;
         this.surface.style.width = `${viewport.width}px`;
         this.surface.style.height = `${viewport.height}px`;
         this.hoveredLinkKey = undefined;
+        this.focusedNodeId = undefined;
         this.hideTooltip();
+        this.hideLandingPage();
         this.svg.replaceChildren();
         this.currentGraphViewport = undefined;
 
@@ -637,8 +680,13 @@ export class Visual implements IVisual {
             return;
         }
 
+        if (!hasAssignedFields) {
+            this.showLandingPage();
+            return;
+        }
+
         if (visualData.nodes.length === 0 || visualData.links.length === 0) {
-            this.renderMessage("Add data to Source->Target Pair(s) and Values to render the Sankey diagram.");
+            this.renderMessage("No valid Sankey flows were found. Use Source->Target Pair(s) values like A -> B and positive numeric Values.");
             return;
         }
 
@@ -737,6 +785,7 @@ export class Visual implements IVisual {
                 const y0 = node.y0 || 0;
                 const y1 = node.y1 || 0;
                 const isSelected = selectedNodeName === node.id;
+                const isFocused = this.focusedNodeId === node.id;
 
                 setAttributes(outline, {
                     x: x0 - 3,
@@ -749,8 +798,8 @@ export class Visual implements IVisual {
                     stroke: this.host.colorPalette.isHighContrast
                         ? this.host.colorPalette.foreground.value
                         : "#0f172a",
-                    "stroke-width": isSelected ? 2 : 0,
-                    opacity: isSelected ? 1 : 0,
+                    "stroke-width": (isSelected || isFocused) ? 2 : 0,
+                    opacity: (isSelected || isFocused) ? 1 : 0,
                 });
 
                 setAttributes(rect, {
@@ -780,11 +829,19 @@ export class Visual implements IVisual {
             setAttributes(path, {
                 fill: "none",
                 "stroke-linecap": "butt",
+                tabindex: 0,
+                focusable: "true",
+                role: "button",
+                "aria-label": this.getLinkAriaLabel(link),
             });
+
+            const activateLink = (multiSelect: boolean): void => {
+                this.selectLink(link, multiSelect);
+            };
 
             path.addEventListener("click", (event: MouseEvent) => {
                 event.stopPropagation();
-                this.selectLink(link, this.isMultiSelect(event));
+                activateLink(this.isMultiSelect(event));
             });
 
             path.addEventListener("contextmenu", (event: MouseEvent) => {
@@ -795,17 +852,12 @@ export class Visual implements IVisual {
 
             path.addEventListener("mouseenter", (event: MouseEvent) => {
                 this.hoveredLinkKey = link.key;
-                this.showTooltip(
-                    `${link.label}: ${this.formatConfiguredValue(link.value)}`,
-                    event.clientX,
-                    event.clientY,
-                    this.getHoveredLinkColor(link.color),
-                );
+                this.showLinkTooltip(link, event.clientX, event.clientY);
                 refreshGraph();
             });
 
             path.addEventListener("mousemove", (event: MouseEvent) => {
-                this.moveTooltip(event.clientX, event.clientY);
+                this.moveTooltip(link.selectionIds, event.clientX, event.clientY);
             });
 
             path.addEventListener("mouseleave", () => {
@@ -813,6 +865,35 @@ export class Visual implements IVisual {
                     this.hoveredLinkKey = undefined;
                     this.hideTooltip();
                     refreshGraph();
+                }
+            });
+
+            path.addEventListener("focus", () => {
+                this.hoveredLinkKey = link.key;
+                this.showLinkTooltipAtElement(link, path);
+                refreshGraph();
+            });
+
+            path.addEventListener("blur", () => {
+                if (this.hoveredLinkKey === link.key) {
+                    this.hoveredLinkKey = undefined;
+                    this.hideTooltip();
+                    refreshGraph();
+                }
+            });
+
+            path.addEventListener("keydown", (event: KeyboardEvent) => {
+                if (this.isActivationKey(event)) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    activateLink(this.isMultiSelect(event));
+                    return;
+                }
+
+                if (this.isContextMenuKey(event)) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    this.showContextMenuAtElement(link.contextMenuSelectionId, path);
                 }
             });
 
@@ -844,7 +925,20 @@ export class Visual implements IVisual {
             setAttributes(rect, {
                 rx: 4,
                 ry: 4,
+                tabindex: 0,
+                focusable: "true",
+                role: "button",
+                "aria-label": this.getNodeAriaLabel(node),
             });
+
+            const activateNode = (multiSelect: boolean): void => {
+                if (isSelected && !multiSelect) {
+                    this.clearSelection();
+                    return;
+                }
+
+                this.selectNode(node, multiSelect);
+            };
 
             rect.addEventListener("pointerdown", (event: PointerEvent) => {
                 this.startNodeDrag(
@@ -865,12 +959,7 @@ export class Visual implements IVisual {
                     return;
                 }
 
-                if (isSelected && !this.isMultiSelect(event)) {
-                    this.clearSelection();
-                    return;
-                }
-
-                this.selectNode(node, this.isMultiSelect(event));
+                activateNode(this.isMultiSelect(event));
             });
 
             rect.addEventListener("contextmenu", (event: MouseEvent) => {
@@ -880,20 +969,44 @@ export class Visual implements IVisual {
             });
 
             rect.addEventListener("mouseenter", (event: MouseEvent) => {
-                this.showTooltip(
-                    `${node.label}: ${this.formatConfiguredValue(this.getNodeDisplayValue(node))}`,
-                    event.clientX,
-                    event.clientY,
-                    node.color,
-                );
+                this.showNodeTooltip(node, event.clientX, event.clientY);
             });
 
             rect.addEventListener("mousemove", (event: MouseEvent) => {
-                this.moveTooltip(event.clientX, event.clientY);
+                this.moveTooltip(node.selectionIds, event.clientX, event.clientY);
             });
 
             rect.addEventListener("mouseleave", () => {
                 this.hideTooltip();
+            });
+
+            rect.addEventListener("focus", () => {
+                this.focusedNodeId = node.id;
+                this.showNodeTooltipAtElement(node, rect);
+                refreshGraph();
+            });
+
+            rect.addEventListener("blur", () => {
+                if (this.focusedNodeId === node.id) {
+                    this.focusedNodeId = undefined;
+                    this.hideTooltip();
+                    refreshGraph();
+                }
+            });
+
+            rect.addEventListener("keydown", (event: KeyboardEvent) => {
+                if (this.isActivationKey(event)) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    activateNode(this.isMultiSelect(event));
+                    return;
+                }
+
+                if (this.isContextMenuKey(event)) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    this.showContextMenuAtElement(node.contextMenuSelectionId, rect);
+                }
             });
 
             nodeGroup.appendChild(rect);
@@ -926,6 +1039,16 @@ export class Visual implements IVisual {
         const suffix = warnings.length > displayedWarnings.length ? ` (+${warnings.length - displayedWarnings.length} more)` : "";
         this.warning.textContent = `${displayedWarnings.join(" ")}${suffix}`;
         this.warning.classList.add("is-visible");
+    }
+
+    private showLandingPage(): void {
+        this.warning.textContent = "";
+        this.warning.classList.remove("is-visible");
+        this.landingPage.classList.add("is-visible");
+    }
+
+    private hideLandingPage(): void {
+        this.landingPage.classList.remove("is-visible");
     }
 
     private renderMessage(message: string): void {
@@ -1608,7 +1731,6 @@ export class Visual implements IVisual {
         const showText = this.formattingSettings.linkLabels.showText.value;
         const showValue = this.formattingSettings.linkLabels.showValue.value;
         const showAsPercentage = this.formattingSettings.valueFormatting.showAsPercentage.value;
-        const decimalPlaces = this.formattingSettings.valueFormatting.decimalPlaces.value;
 
         if (!showText && !showValue) {
             return undefined;
@@ -1617,7 +1739,7 @@ export class Visual implements IVisual {
         const sourceLabel = this.getEndpointLabel(link.source);
         const targetLabel = this.getEndpointLabel(link.target);
         const linkText = `${sourceLabel} -> ${targetLabel}`;
-        const formattedValue = this.formatConfiguredValue(link.value, showAsPercentage, decimalPlaces);
+        const formattedValue = this.formatConfiguredValue(link.value, showAsPercentage);
 
         if (showText && showValue) {
             return `${linkText} (${formattedValue})`;
@@ -1633,44 +1755,100 @@ export class Visual implements IVisual {
     private formatConfiguredValue(
         value: number,
         showAsPercentage: boolean = this.formattingSettings.valueFormatting.showAsPercentage.value,
-        decimalPlaces: number = this.formattingSettings.valueFormatting.decimalPlaces.value,
     ): string {
-        return formatValueWithOptions(value, decimalPlaces, showAsPercentage);
+        return showAsPercentage
+            ? this.percentageValueFormatter.format(value)
+            : this.modelValueFormatter.format(value);
     }
 
     private getHoveredLinkColor(color: string): string {
         return this.host.colorPalette.isHighContrast ? color : mixWithWhite(color, 0.28);
     }
 
-    private showTooltip(content: string, clientX: number, clientY: number, accentColor: string): void {
-        this.hoverTooltip.textContent = content;
-        this.hoverTooltip.style.backgroundColor = accentColor;
-        this.hoverTooltip.style.color = getContrastTextColor(accentColor);
-        this.hoverTooltip.classList.add("is-visible");
-        this.moveTooltip(clientX, clientY);
+    private getNodeTooltipItems(node: GraphNode): TooltipItem[] {
+        return [
+            {
+                header: node.label,
+                displayName: "Value",
+                value: this.formatConfiguredValue(this.getNodeDisplayValue(node)),
+                color: node.color,
+            },
+            {
+                displayName: "Incoming",
+                value: this.formatConfiguredValue(node.incomingValue),
+            },
+            {
+                displayName: "Outgoing",
+                value: this.formatConfiguredValue(node.outgoingValue),
+            },
+        ];
     }
 
-    private moveTooltip(clientX: number, clientY: number): void {
-        if (!this.hoverTooltip.classList.contains("is-visible")) {
+    private getLinkTooltipItems(link: GraphLink): TooltipItem[] {
+        const sourceLabel = this.getEndpointLabel(link.source);
+        const targetLabel = this.getEndpointLabel(link.target);
+        return [
+            {
+                header: `${sourceLabel} -> ${targetLabel}`,
+                displayName: "Value",
+                value: this.formatConfiguredValue(link.value),
+                color: this.getHoveredLinkColor(link.color),
+            },
+        ];
+    }
+
+    private showNodeTooltip(node: GraphNode, clientX: number, clientY: number): void {
+        this.showTooltip(this.getNodeTooltipItems(node), node.selectionIds, clientX, clientY);
+    }
+
+    private showNodeTooltipAtElement(node: GraphNode, element: SVGGraphicsElement): void {
+        const [x, y] = this.getElementCenterCoordinates(element);
+        this.showNodeTooltip(node, x, y);
+    }
+
+    private showLinkTooltip(link: GraphLink, clientX: number, clientY: number): void {
+        this.showTooltip(this.getLinkTooltipItems(link), link.selectionIds, clientX, clientY);
+    }
+
+    private showLinkTooltipAtElement(link: GraphLink, element: SVGGraphicsElement): void {
+        const [x, y] = this.getElementCenterCoordinates(element);
+        this.showLinkTooltip(link, x, y);
+    }
+
+    private showTooltip(dataItems: TooltipItem[], identities: ISelectionId[], clientX: number, clientY: number): void {
+        if (!this.host.tooltipService.enabled()) {
             return;
         }
 
-        const surfaceRect = this.surface.getBoundingClientRect();
-        const offsetX = 16;
-        const offsetY = 18;
-        const tooltipWidth = this.hoverTooltip.offsetWidth;
-        const tooltipHeight = this.hoverTooltip.offsetHeight;
-        const maxLeft = Math.max(12, surfaceRect.width - tooltipWidth - 12);
-        const maxTop = Math.max(12, surfaceRect.height - tooltipHeight - 12);
-        const left = clamp((clientX - surfaceRect.left) + offsetX, 12, maxLeft);
-        const top = clamp((clientY - surfaceRect.top) + offsetY, 12, maxTop);
+        this.host.tooltipService.show({
+            coordinates: [clientX, clientY],
+            isTouchEvent: false,
+            dataItems,
+            identities,
+        });
+    }
 
-        this.hoverTooltip.style.left = `${left}px`;
-        this.hoverTooltip.style.top = `${top}px`;
+    private moveTooltip(identities: ISelectionId[], clientX: number, clientY: number): void {
+        if (!this.host.tooltipService.enabled()) {
+            return;
+        }
+
+        this.host.tooltipService.move({
+            coordinates: [clientX, clientY],
+            isTouchEvent: false,
+            identities,
+        });
     }
 
     private hideTooltip(): void {
-        this.hoverTooltip.classList.remove("is-visible");
+        if (!this.host.tooltipService.enabled()) {
+            return;
+        }
+
+        this.host.tooltipService.hide({
+            isTouchEvent: false,
+            immediately: false,
+        });
     }
 
     private getNodeLabelAttributes(node: GraphNode, viewportWidth: number): Record<string, string | number> {
@@ -1730,16 +1908,49 @@ export class Visual implements IVisual {
         return nodeReference.label;
     }
 
-    private isMultiSelect(event: MouseEvent): boolean {
+    private getNodeAriaLabel(node: GraphNode): string {
+        return `Node ${node.label}, value ${this.formatConfiguredValue(this.getNodeDisplayValue(node))}`;
+    }
+
+    private getLinkAriaLabel(link: GraphLink): string {
+        return `Flow ${this.getEndpointLabel(link.source)} to ${this.getEndpointLabel(link.target)}, value ${this.formatConfiguredValue(link.value)}`;
+    }
+
+    private getElementCenterCoordinates(element: SVGGraphicsElement): [number, number] {
+        const bounds = element.getBoundingClientRect();
+        return [
+            bounds.left + (bounds.width / 2),
+            bounds.top + (bounds.height / 2),
+        ];
+    }
+
+    private isActivationKey(event: KeyboardEvent): boolean {
+        return event.key === "Enter" || event.key === " ";
+    }
+
+    private isContextMenuKey(event: KeyboardEvent): boolean {
+        return event.key === "ContextMenu" || (event.shiftKey && event.key === "F10");
+    }
+
+    private isMultiSelect(event: MouseEvent | KeyboardEvent): boolean {
         return event.ctrlKey || event.metaKey;
     }
 
     private showContextMenu(selectionId: ISelectionId | undefined, event: MouseEvent): void {
+        this.showContextMenuAtCoordinates(selectionId, event.clientX, event.clientY);
+    }
+
+    private showContextMenuAtElement(selectionId: ISelectionId | undefined, element: SVGGraphicsElement): void {
+        const [x, y] = this.getElementCenterCoordinates(element);
+        this.showContextMenuAtCoordinates(selectionId, x, y);
+    }
+
+    private showContextMenuAtCoordinates(selectionId: ISelectionId | undefined, x: number, y: number): void {
         void this.selectionManager.showContextMenu(
             selectionId || ({} as ISelectionId),
             {
-                x: event.clientX,
-                y: event.clientY,
+                x,
+                y,
             },
         );
     }

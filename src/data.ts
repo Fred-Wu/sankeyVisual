@@ -1,4 +1,5 @@
 import powerbi from "powerbi-visuals-api";
+import { valueFormatter } from "powerbi-visuals-utils-formattingutils";
 
 import DataView = powerbi.DataView;
 import DataViewCategoryColumn = powerbi.DataViewCategoryColumn;
@@ -88,6 +89,38 @@ interface SankeyAccumulator {
 }
 
 const supportedArrowTokens: string[] = ["->", "=>", "→"];
+const maxDetailedWarnings = 10;
+export const maxRenderedLinks = 1000;
+
+function addWarning(accumulator: SankeyAccumulator, warning: string): void {
+    if (accumulator.warnings.length < maxDetailedWarnings) {
+        accumulator.warnings.push(warning);
+        return;
+    }
+
+    if (accumulator.warnings.length === maxDetailedWarnings) {
+        accumulator.warnings.push("Additional invalid rows were skipped.");
+    }
+}
+
+function createCategoryValueFormatter(
+    column: powerbi.DataViewMetadataColumn,
+    cultureSelector?: string,
+): (value: powerbi.PrimitiveValue) => string {
+    const formatter = valueFormatter.create({
+        format: column.format,
+        columnType: column.type,
+        cultureSelector,
+    });
+
+    return (value: powerbi.PrimitiveValue): string => {
+        if (value === null || value === undefined) {
+            return "";
+        }
+
+        return formatter.format(value);
+    };
+}
 
 function parsePairCell(input: string): Array<{ source: string; target: string }> {
     const parts = input
@@ -260,13 +293,13 @@ function addInlinePairRow(
 ): void {
     const trimmedText = pairText.trim();
     if (!trimmedText) {
-        accumulator.warnings.push(`Row ${rowIndex + 1} has an empty Source->Target Pair(s) value and was skipped.`);
+        addWarning(accumulator, `Row ${rowIndex + 1} has an empty Source->Target Pair(s) value and was skipped.`);
         return;
     }
 
     const parsedPairs = parsePairCell(trimmedText);
     if (parsedPairs.length === 0) {
-        accumulator.warnings.push(`Row ${rowIndex + 1} could not be parsed. Use formats like "A -> B" or "A -> B, C".`);
+        addWarning(accumulator, `Row ${rowIndex + 1} could not be parsed. Use formats like "A -> B" or "A -> B, C".`);
         return;
     }
 
@@ -315,7 +348,7 @@ function addLayeredPairRow(
     }
 
     if (!addedEdge) {
-        accumulator.warnings.push(`Row ${rowIndex + 1} needs at least two populated category values in Source->Target Pair(s).`);
+        addWarning(accumulator, `Row ${rowIndex + 1} needs at least two populated category values in Source->Target Pair(s).`);
     }
 }
 
@@ -426,21 +459,80 @@ export function serializeStyleMap(styleMap: StyleMap): string {
     return JSON.stringify(normalized);
 }
 
+function limitAccumulatorForRendering(accumulator: SankeyAccumulator): SankeyAccumulator {
+    if (accumulator.links.size <= maxRenderedLinks) {
+        return accumulator;
+    }
+
+    const retainedLinks = Array.from(accumulator.links.values())
+        .sort((left: PendingLink, right: PendingLink) =>
+            (right.value - left.value) || left.key.localeCompare(right.key))
+        .slice(0, maxRenderedLinks);
+    const limitedAccumulator = createAccumulator();
+
+    limitedAccumulator.warnings = [
+        `Displaying the top ${maxRenderedLinks.toLocaleString()} of ${accumulator.links.size.toLocaleString()} aggregated flows by value to protect report performance.`,
+        ...accumulator.warnings,
+    ];
+
+    retainedLinks.forEach((link: PendingLink) => {
+        const sourceNode = accumulator.nodes.get(link.source);
+        const targetNode = accumulator.nodes.get(link.target);
+        if (!sourceNode || !targetNode) {
+            return;
+        }
+
+        addNodeIfMissing(
+            limitedAccumulator,
+            link.source,
+            sourceNode.label,
+            sourceNode.layerIndex,
+        );
+        addNodeIfMissing(
+            limitedAccumulator,
+            link.target,
+            targetNode.label,
+            targetNode.layerIndex,
+        );
+
+        const limitedSourceNode = limitedAccumulator.nodes.get(link.source);
+        const limitedTargetNode = limitedAccumulator.nodes.get(link.target);
+        if (!limitedSourceNode || !limitedTargetNode) {
+            return;
+        }
+
+        limitedAccumulator.links.set(link.key, {
+            ...link,
+            selectionIds: new Map<string, ISelectionId>(link.selectionIds),
+        });
+        limitedSourceNode.outgoingValue += link.value;
+        limitedTargetNode.incomingValue += link.value;
+
+        link.selectionIds.forEach((selectionId: ISelectionId) => {
+            addSelectionId(limitedSourceNode.selectionIds, selectionId);
+            addSelectionId(limitedTargetNode.selectionIds, selectionId);
+        });
+    });
+
+    return limitedAccumulator;
+}
+
 function finalizeSankeyData(accumulator: SankeyAccumulator, palette: IColorPalette, styles: AppliedStyleContext): SankeyVisualData {
+    const renderingAccumulator = limitAccumulatorForRendering(accumulator);
     const paletteColors = new Map<string, string>();
     if (styles.useThemePalette && !styles.isHighContrast) {
-        accumulator.nodeOrder.forEach((nodeId: string) => {
+        renderingAccumulator.nodeOrder.forEach((nodeId: string) => {
             paletteColors.set(nodeId, palette.getColor(nodeId).value);
         });
     } else if (!styles.isHighContrast && styles.nodePaletteColors?.length) {
-        accumulator.nodeOrder.forEach((nodeId: string, index: number) => {
+        renderingAccumulator.nodeOrder.forEach((nodeId: string, index: number) => {
             paletteColors.set(nodeId, styles.nodePaletteColors![index % styles.nodePaletteColors!.length]);
         });
     }
 
     const nodeColors = new Map<string, string>();
-    const nodes: SankeyNodeDatum[] = accumulator.nodeOrder.map((nodeId: string) => {
-        const nodeInfo = accumulator.nodes.get(nodeId) || {
+    const nodes: SankeyNodeDatum[] = renderingAccumulator.nodeOrder.map((nodeId: string) => {
+        const nodeInfo = renderingAccumulator.nodes.get(nodeId) || {
             label: nodeId,
             layerIndex: 0,
             incomingValue: 0,
@@ -465,9 +557,9 @@ function finalizeSankeyData(accumulator: SankeyAccumulator, palette: IColorPalet
         };
     });
 
-    const links: SankeyLinkDatum[] = Array.from(accumulator.links.values()).map((link: PendingLink) => {
-        const sourceNode = accumulator.nodes.get(link.source);
-        const targetNode = accumulator.nodes.get(link.target);
+    const links: SankeyLinkDatum[] = Array.from(renderingAccumulator.links.values()).map((link: PendingLink) => {
+        const sourceNode = renderingAccumulator.nodes.get(link.source);
+        const targetNode = renderingAccumulator.nodes.get(link.target);
         const selectionIds = getSelectionArray(link.selectionIds);
 
         return {
@@ -487,7 +579,7 @@ function finalizeSankeyData(accumulator: SankeyAccumulator, palette: IColorPalet
     return {
         nodes,
         links,
-        warnings: accumulator.warnings,
+        warnings: renderingAccumulator.warnings,
     };
 }
 
@@ -496,6 +588,7 @@ function buildSankeyDataFromTable(
     palette: IColorPalette,
     styles: AppliedStyleContext,
     selectionIdBuilderFactory?: SelectionIdBuilderFactory,
+    cultureSelector?: string,
 ): SankeyVisualData | undefined {
     if (!table?.columns?.length) {
         return undefined;
@@ -519,24 +612,27 @@ function buildSankeyDataFromTable(
     }
 
     const accumulator = createAccumulator();
+    const pairFormatters = pairIndexes.map((index: number) =>
+        createCategoryValueFormatter(table.columns[index], cultureSelector));
 
     table.rows?.forEach((row: powerbi.DataViewTableRow, rowIndex: number) => {
         const rawValue = Number(row[valueIndex]);
         if (!Number.isFinite(rawValue) || rawValue <= 0) {
-            accumulator.warnings.push(`Row ${rowIndex + 1} has a non-positive Values entry and was skipped.`);
+            addWarning(accumulator, `Row ${rowIndex + 1} has a non-positive Values entry and was skipped.`);
             return;
         }
 
         const selectionId = buildTableRowSelectionId(selectionIdBuilderFactory, table, rowIndex);
 
         if (pairIndexes.length === 1) {
-            addInlinePairRow(accumulator, String(row[pairIndexes[0]] ?? ""), rawValue, rowIndex, selectionId);
+            addInlinePairRow(accumulator, pairFormatters[0](row[pairIndexes[0]]), rawValue, rowIndex, selectionId);
             return;
         }
 
         addLayeredPairRow(
             accumulator,
-            pairIndexes.map((index: number) => String(row[index] ?? "")),
+            pairIndexes.map((index: number, formatterIndex: number) =>
+                pairFormatters[formatterIndex](row[index])),
             rawValue,
             rowIndex,
             selectionId,
@@ -551,6 +647,7 @@ function buildSankeyDataFromCategorical(
     palette: IColorPalette,
     styles: AppliedStyleContext,
     selectionIdBuilderFactory?: SelectionIdBuilderFactory,
+    cultureSelector?: string,
 ): SankeyVisualData | undefined {
     const categoryColumns: DataViewCategoryColumn[] = (dataView?.categorical?.categories || [])
         .filter((column: DataViewCategoryColumn) => column.source.roles?.pairs);
@@ -564,24 +661,33 @@ function buildSankeyDataFromCategorical(
 
     const rowCount = Math.max(...categoryColumns.map((column: DataViewCategoryColumn) => column.values.length), valueColumn.values?.length || 0);
     const accumulator = createAccumulator();
+    const categoryFormatters = categoryColumns.map((column: DataViewCategoryColumn) =>
+        createCategoryValueFormatter(column.source, cultureSelector));
 
     for (let rowIndex = 0; rowIndex < rowCount; rowIndex++) {
         const rawValue = Number(valueColumn.values?.[rowIndex]);
         if (!Number.isFinite(rawValue) || rawValue <= 0) {
-            accumulator.warnings.push(`Row ${rowIndex + 1} has a non-positive Values entry and was skipped.`);
+            addWarning(accumulator, `Row ${rowIndex + 1} has a non-positive Values entry and was skipped.`);
             continue;
         }
 
         const selectionId = buildCategoricalRowSelectionId(selectionIdBuilderFactory, categoryColumns, rowIndex);
 
         if (categoryColumns.length === 1) {
-            addInlinePairRow(accumulator, String(categoryColumns[0].values[rowIndex] ?? ""), rawValue, rowIndex, selectionId);
+            addInlinePairRow(
+                accumulator,
+                categoryFormatters[0](categoryColumns[0].values[rowIndex]),
+                rawValue,
+                rowIndex,
+                selectionId,
+            );
             continue;
         }
 
         addLayeredPairRow(
             accumulator,
-            categoryColumns.map((column: DataViewCategoryColumn) => String(column.values[rowIndex] ?? "")),
+            categoryColumns.map((column: DataViewCategoryColumn, formatterIndex: number) =>
+                categoryFormatters[formatterIndex](column.values[rowIndex])),
             rawValue,
             rowIndex,
             selectionId,
@@ -596,13 +702,26 @@ export function buildSankeyData(
     palette: IColorPalette,
     styles: AppliedStyleContext,
     selectionIdBuilderFactory?: SelectionIdBuilderFactory,
+    cultureSelector?: string,
 ): SankeyVisualData {
-    const categoricalData = buildSankeyDataFromCategorical(dataView, palette, styles, selectionIdBuilderFactory);
+    const categoricalData = buildSankeyDataFromCategorical(
+        dataView,
+        palette,
+        styles,
+        selectionIdBuilderFactory,
+        cultureSelector,
+    );
     if (categoricalData) {
         return categoricalData;
     }
 
-    const tableData = buildSankeyDataFromTable(dataView?.table, palette, styles, selectionIdBuilderFactory);
+    const tableData = buildSankeyDataFromTable(
+        dataView?.table,
+        palette,
+        styles,
+        selectionIdBuilderFactory,
+        cultureSelector,
+    );
     if (tableData) {
         return tableData;
     }
@@ -619,18 +738,19 @@ export function buildSankeyData(
     }
 
     const accumulator = createAccumulator();
+    const categoryFormatter = createCategoryValueFormatter(categoryColumn.source, cultureSelector);
 
     categoryColumn.values.forEach((rawPair: powerbi.PrimitiveValue, index: number) => {
         const rawValue = Number(valueColumn.values?.[index]);
 
         if (!Number.isFinite(rawValue) || rawValue <= 0) {
-            accumulator.warnings.push(`Row ${index + 1} has a non-positive Values entry and was skipped.`);
+            addWarning(accumulator, `Row ${index + 1} has a non-positive Values entry and was skipped.`);
             return;
         }
 
         addInlinePairRow(
             accumulator,
-            String(rawPair ?? ""),
+            categoryFormatter(rawPair),
             rawValue,
             index,
             buildCategoricalRowSelectionId(selectionIdBuilderFactory, [categoryColumn], index),

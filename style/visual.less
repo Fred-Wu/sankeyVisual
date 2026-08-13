@@ -80,26 +80,35 @@
     box-shadow: 0 4px 14px rgba(15, 23, 42, 0.08);
 }
 
-.sankey-hover-tooltip {
-    position: absolute;
-    z-index: 2;
-    max-width: min(360px, calc(100% - 24px));
-    padding: 10px 12px;
+.sankey-landing {
+    display: none;
+    max-width: min(100%, 560px);
     border-radius: 12px;
-    font-size: 13px;
-    line-height: 1.45;
-    font-weight: 600;
-    letter-spacing: 0.01em;
-    box-shadow: 0 10px 26px rgba(15, 23, 42, 0.18);
-    pointer-events: none;
-    opacity: 0;
-    visibility: hidden;
-    transition: opacity 90ms ease;
+    padding: 16px 18px;
+    color: #334155;
+    background: rgba(248, 250, 252, 0.94);
+    box-shadow: 0 10px 26px rgba(15, 23, 42, 0.12);
 }
 
-.sankey-hover-tooltip.is-visible {
-    opacity: 1;
-    visibility: visible;
+.sankey-landing.is-visible {
+    display: block;
+}
+
+.sankey-landing-title {
+    font-size: 14px;
+    font-weight: 700;
+    color: #0f172a;
+}
+
+.sankey-landing-body,
+.sankey-landing-hint {
+    margin-top: 6px;
+    font-size: 12px;
+    line-height: 1.5;
+}
+
+.sankey-landing-hint {
+    color: #475569;
 }
 
 .sankey-warning {
@@ -108,4 +117,9 @@
 
 .sankey-warning.is-visible {
     visibility: visible;
+}
+
+.sankey-link:focus,
+.sankey-node:focus {
+    outline: none;
 }

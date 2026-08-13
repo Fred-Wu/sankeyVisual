@@ -160,14 +160,19 @@ class ValueFormattingCardSettings extends Card {
 
     decimalPlaces = new NumUpDown({
         name: "decimalPlaces",
-        displayName: "Decimal places",
+        displayName: "Percentage decimal places",
         value: 2,
         options: decimalPlacesOptions,
+        visible: false,
     });
 
     name: string = "valueFormatting";
     displayName: string = "Value Format";
     slices: Slice[] = [this.showAsPercentage, this.decimalPlaces];
+
+    sync(): void {
+        this.decimalPlaces.visible = this.showAsPercentage.value;
+    }
 }
 
 class NodeFormatCardSettings extends Card {
@@ -310,6 +315,7 @@ export class VisualFormattingSettingsModel extends Model {
         showNodeStyleControls: boolean;
         showNodeFillControl: boolean;
     }): void {
+        this.valueFormatting.sync();
         this.defaultNodes.sync(
             options.nodeTargetName,
             options.nodeTargetStyle,
