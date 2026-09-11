@@ -52,6 +52,7 @@ import {
 } from "./data";
 import { defaultNodePaletteMode, getNodePaletteColors, isNodePaletteMode, NodePaletteMode } from "./palettes";
 import { VisualFormattingSettingsModel } from "./settings";
+import { alignByInputOrder } from "./layout";
 
 type VisualNode = {
     id: string;
@@ -160,10 +161,6 @@ function setAttributes(element: Element, attributes: Record<string, string | num
     Object.keys(attributes).forEach((key: string) => {
         element.setAttribute(key, String(attributes[key]));
     });
-}
-
-function alignByInputOrder(node: VisualNode, maxDepth: number): number {
-    return Math.max(0, Math.min(maxDepth - 1, node.layerIndex));
 }
 
 function clamp(value: number, minValue: number, maxValue: number): number {

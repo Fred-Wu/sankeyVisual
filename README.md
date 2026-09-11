@@ -106,10 +106,14 @@ Behavior:
 npm install
 npm start
 npm run lint
+npm test
 npm run package
 ```
 
 `npm run package` runs `pbiviz package --certification-audit`.
+
+`npm test` runs the Sankey layout regression tests and requires Node.js 22.18+ or 24+.
+`npm run check` runs lint, type checking, regression tests, the dependency audit, and packaging.
 
 ## Publication and certification status
 
