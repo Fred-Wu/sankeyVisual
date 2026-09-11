@@ -230,6 +230,7 @@ function clampNodeToBounds(node: GraphNode, bounds: DragBounds): void {
 
 export class Visual implements IVisual {
     private readonly host: IVisualHost;
+    private readonly allowInteractions: boolean;
     private readonly events: IVisualEventService;
     private readonly selectionManager: ISelectionManager;
     private readonly root: HTMLDivElement;
@@ -258,6 +259,7 @@ export class Visual implements IVisual {
 
     constructor(options: VisualConstructorOptions) {
         this.host = options.host;
+        this.allowInteractions = this.host.hostCapabilities?.allowInteractions !== false;
         this.events = options.host.eventService;
         this.selectionManager = this.host.createSelectionManager();
         this.formattingSettingsService = new FormattingSettingsService();
@@ -272,6 +274,7 @@ export class Visual implements IVisual {
 
         this.root = document.createElement("div");
         this.root.className = "sankey-root";
+        this.root.classList.toggle("is-interactive", this.allowInteractions);
 
         this.surface = document.createElement("div");
         this.surface.className = "sankey-surface";
@@ -307,6 +310,10 @@ export class Visual implements IVisual {
         this.overlay.appendChild(this.landingPage);
         this.overlay.appendChild(this.warning);
         this.svg.addEventListener("click", () => {
+            if (!this.allowInteractions) {
+                return;
+            }
+
             if (this.suppressClickSelection) {
                 this.suppressClickSelection = false;
                 return;
@@ -828,7 +835,7 @@ export class Visual implements IVisual {
                 "stroke-linecap": "butt",
                 tabindex: 0,
                 focusable: "true",
-                role: "button",
+                role: this.allowInteractions ? "button" : "img",
                 "aria-label": this.getLinkAriaLabel(link),
             });
 
@@ -837,6 +844,10 @@ export class Visual implements IVisual {
             };
 
             path.addEventListener("click", (event: MouseEvent) => {
+                if (!this.allowInteractions) {
+                    return;
+                }
+
                 event.stopPropagation();
                 activateLink(this.isMultiSelect(event));
             });
@@ -880,7 +891,7 @@ export class Visual implements IVisual {
             });
 
             path.addEventListener("keydown", (event: KeyboardEvent) => {
-                if (this.isActivationKey(event)) {
+                if (this.allowInteractions && this.isActivationKey(event)) {
                     event.preventDefault();
                     event.stopPropagation();
                     activateLink(this.isMultiSelect(event));
@@ -924,7 +935,7 @@ export class Visual implements IVisual {
                 ry: 4,
                 tabindex: 0,
                 focusable: "true",
-                role: "button",
+                role: this.allowInteractions ? "button" : "img",
                 "aria-label": this.getNodeAriaLabel(node),
             });
 
@@ -950,6 +961,10 @@ export class Visual implements IVisual {
             });
 
             rect.addEventListener("click", (event: MouseEvent) => {
+                if (!this.allowInteractions) {
+                    return;
+                }
+
                 event.stopPropagation();
                 if (this.suppressClickSelection) {
                     this.suppressClickSelection = false;
@@ -992,7 +1007,7 @@ export class Visual implements IVisual {
             });
 
             rect.addEventListener("keydown", (event: KeyboardEvent) => {
-                if (this.isActivationKey(event)) {
+                if (this.allowInteractions && this.isActivationKey(event)) {
                     event.preventDefault();
                     event.stopPropagation();
                     activateNode(this.isMultiSelect(event));
@@ -1090,7 +1105,7 @@ export class Visual implements IVisual {
     }
 
     private handleWheelZoom(event: WheelEvent): void {
-        if (!this.currentGraphViewport || !this.currentViewport) {
+        if (!this.allowInteractions || !this.currentGraphViewport || !this.currentViewport) {
             return;
         }
 
@@ -1112,7 +1127,8 @@ export class Visual implements IVisual {
 
     private startViewportPan(event: PointerEvent): void {
         if (
-            event.button !== 0
+            !this.allowInteractions
+            || event.button !== 0
             || !this.currentViewport
             || !this.currentGraphViewport
             || this.zoomState.scale <= minZoomScale
@@ -1237,7 +1253,7 @@ export class Visual implements IVisual {
             });
         }
 
-        const isPannable = Boolean(this.currentGraphViewport) && this.zoomState.scale > minZoomScale + 0.001;
+        const isPannable = this.allowInteractions && Boolean(this.currentGraphViewport) && this.zoomState.scale > minZoomScale + 0.001;
         this.svg.classList.toggle("is-pannable", isPannable);
         if (!isPannable) {
             this.svg.classList.remove("is-panning");
@@ -1253,7 +1269,7 @@ export class Visual implements IVisual {
         dragBounds: DragBounds,
         refreshGraph: () => void,
     ): void {
-        if (event.button !== 0) {
+        if (!this.allowInteractions || event.button !== 0) {
             return;
         }
 
@@ -1982,16 +1998,28 @@ export class Visual implements IVisual {
     }
 
     private selectNode(node: VisualNode, multiSelect: boolean): void {
+        if (!this.allowInteractions) {
+            return;
+        }
+
         this.persistSelectedNodeName(node.id);
         this.selectVisualDataPoint(node.selectionIds, multiSelect);
     }
 
     private selectLink(link: VisualLink, multiSelect: boolean): void {
+        if (!this.allowInteractions) {
+            return;
+        }
+
         this.persistSelectedNodeName(undefined);
         this.selectVisualDataPoint(link.selectionIds, multiSelect);
     }
 
     private clearSelection(): void {
+        if (!this.allowInteractions) {
+            return;
+        }
+
         this.persistSelectedNodeName(undefined);
         void this.selectionManager.clear();
     }

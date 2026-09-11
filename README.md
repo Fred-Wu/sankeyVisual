@@ -10,21 +10,22 @@ A custom Power BI visual for showing how values flow between categories. The wid
 
 ## Prepare your data
 
-Use either a single field containing source-to-target pairs:
+The visual uses **distinct combinations of the selected group columns**, with **one aggregated numeric value for each combination**:
 
-| Source->Target Pair(s) | Values |
-| --- | ---: |
-| Sales -> Operations | 80 |
-| Sales -> Marketing | 20 |
-
-Or use separate fields for successive stages. Add the category fields in the order you want them to appear:
-
-| Region | Channel | Product | Values |
+| Region | Channel | Product | Amount |
 | --- | --- | --- | ---: |
 | East | Online | Product A | 80 |
 | West | Retail | Product B | 20 |
+| East | Retail | Product B | 40 |
 
-Repeated connections are combined. Values must be positive numbers. Blank categories omit their adjacent connections.
+In the visual's field wells:
+
+- **Source->Target Pair(s):** Add the group columns in stage order: **Region**, **Channel**, then **Product**. Use at least two group columns.
+- **Values:** Add one numeric measure, such as **Sum of Amount**.
+
+Power BI groups the data by those columns and evaluates the measure for each distinct combination. The visual then creates connections between adjacent groups. For the first row, it creates **East → Online** and **Online → Product A**, each with a value of **80**.
+
+Use one numeric measure in **Values**. Zero, negative, and invalid values are skipped. Repeated connections are summed. Blank stage values omit their adjacent connections.
 
 ## Customize the visual
 
