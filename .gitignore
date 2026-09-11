@@ -2,3 +2,6 @@ node_modules/
 .tmp/
 dist/
 coverage/
+.vscode/
+webpack.statistics*.html
+npm-debug.log*

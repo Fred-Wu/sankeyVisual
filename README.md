@@ -1,148 +1,46 @@
 # Sankey Flow
 
-Interactive Power BI Sankey visual focused on a clean interaction model and AppSource-ready implementation.
+A custom Power BI visual for showing how values flow between categories. The width of each connection represents its value, making it easy to compare flows such as spending, customer journeys, or process stages.
 
-## Current implementation
+## Get started
 
-- Renders Sankey flows from `Source->Target Pair(s)` and `Values`.
-- Supports either:
-  - one `pairs` field with inline values such as `A -> B`, `A -> B, C`, and multiple entries split by `;` or new lines
-  - multiple `pairs` fields to build layered flows across columns
-- Persists node positions after drag and reapplies them on refresh.
-- Supports Power BI cross-visual selection through `ISelectionManager` and row-backed `ISelectionId`s.
-- Supports Power BI context menus on both data points and empty space.
-- Uses the Power BI host tooltip service for nodes and links.
-- Supports keyboard focus for nodes and links with `Enter`/`Space` activation and keyboard context menus.
-- Shows a landing page when no data fields are bound.
-- Shows inline warnings when rows are skipped because values are invalid or pair strings cannot be parsed.
-- Requests up to 30,000 rows, aggregates repeated flows, and renders the top 1,000 aggregated flows when necessary to protect report performance.
-- Uses the semantic model's measure and category format strings and the Power BI host locale.
+1. Import the `.pbiviz` file into your Power BI report.
+2. Add **Sankey Flow** to the report canvas.
+3. Add your category fields to **Source->Target Pair(s)** and a numeric measure to **Values**.
 
-## Data roles
+## Prepare your data
 
-- `Source->Target Pair(s)`: one or more categorical fields
-- `Values`: one numeric measure
+Use either a single field containing source-to-target pairs:
 
-Rows with non-positive values are ignored. For a single pair field, use values like:
+| Source->Target Pair(s) | Values |
+| --- | ---: |
+| Sales -> Operations | 80 |
+| Sales -> Marketing | 20 |
 
-```text
-A -> B
-A -> B, C
-A -> B; B -> D
-```
+Or use separate fields for successive stages. Add the category fields in the order you want them to appear:
 
-## Format pane
+| Region | Channel | Product | Values |
+| --- | --- | --- | ---: |
+| East | Online | Product A | 80 |
+| West | Retail | Product B | 20 |
 
-### Layout
+Repeated connections are combined. Values must be positive numbers. Blank categories omit their adjacent connections.
 
-- `Node width`
-- `Node spacing`
+## Customize the visual
 
-### Node Labels
+Use the Format pane to adjust node width and spacing, show or hide node and connection labels, change colors and palettes, and display values as percentages.
 
-- `Show`
-- `Show text`
-- `Show value`
-- `Font size`
-- `Color`
+Values otherwise follow the measure's Power BI format, such as currency or decimal places.
 
-### Edge Labels
+## Explore your flows
 
-- `Show`
-- `Show text`
-- `Show value`
-- `Font size`
-- `Color`
+- **Select:** Click a node or connection to filter other visuals. Hold Ctrl/Cmd to select more than one; click empty space to clear.
+- **Inspect:** Hover over a node or connection to see its tooltip. Right-click for the Power BI context menu.
+- **Arrange:** Drag nodes to reposition them. Positions are saved with the report.
+- **Keyboard:** Use Tab to move between nodes and connections, Enter/Space to select, and Shift+F10 for the context menu.
 
-### Value Format
+For large datasets, the visual uses up to 30,000 rows and displays at most 1,000 aggregated connections. A warning appears when connections are omitted from the display.
 
-- `Show as percentage`
-- `Percentage decimal places` (shown when `Show as percentage` is enabled)
+## Support
 
-When percentage display is disabled, labels, tooltips, and accessibility text use the Values measure's semantic-model format string.
-
-### Node Format
-
-- `Editing`
-- `Use report palette`
-- `Palette`
-- `Color`
-
-Behavior:
-
-- When `Use report palette` is `On`, nodes use the Power BI report palette. Selecting a node exposes a color override for that node.
-- When `Use report palette` is `Off` and `Palette` is `Single color`, the `Color` picker controls the global node color.
-- When `Use report palette` is `Off` and `Palette` is a preset palette, the visual cycles preset colors across nodes.
-- Preset palettes currently available:
-  - `Tableau`
-  - `Okabe-Ito`
-  - `Soft modern`
-  - `Muted executive`
-  - `IBM Carbon`
-
-## Interaction behavior
-
-- Click a node to select its contributing data rows in Power BI.
-- Click a link to select the rows contributing to that connection.
-- Use `Ctrl` or `Cmd` while clicking for multi-select.
-- Click empty space to clear selection.
-- Right-click a node or link to open the Power BI data-point context menu.
-- Right-click empty space to open the general Power BI context menu.
-- Drag nodes to reposition them inside the plot area.
-- Hover or focus nodes and links to see the Power BI host tooltip.
-- Press `Tab` to move across links and nodes, `Enter` or `Space` to select, and `Shift+F10` or the context-menu key to open the context menu.
-
-## Styling notes
-
-- Links inherit the source-node color by default.
-- Link opacity currently stays on the internal fixed default; there is no visible link opacity control in the format pane.
-- Node opacity is still stored internally for compatibility, but the visible node opacity control has been removed.
-- The old outer background pane and drag-help overlay message were removed.
-- There is no separate visible link formatting card at the moment.
-
-## Development
-
-```bash
-npm install
-npm start
-npm run lint
-npm test
-npm run package
-```
-
-`npm run package` runs `pbiviz package --certification-audit`.
-
-`npm test` runs the Sankey layout regression tests and requires Node.js 22.18+ or 24+.
-`npm run check` runs lint, type checking, regression tests, the dependency audit, and packaging.
-
-## Publication and certification status
-
-The codebase now includes several certification-readiness features:
-
-- `apiVersion` `5.11.0`
-- locally pinned `powerbi-visuals-tools` `7.2.1`
-- `powerbi-visuals-api` package `5.11.1`
-- no declared privileges
-- Power BI selection manager integration
-- empty-space and data-point context menus
-- cross-visual selection support
-- Power BI host tooltip integration
-- keyboard-focus support through `supportsKeyboardFocus`
-- landing-page support through `supportsLandingPage` and `supportsEmptyDataView`
-- clean moderate-and-higher `npm audit` result through the current dependency overrides
-- successful `pbiviz package --certification-audit`
-
-Still required before Microsoft submission:
-
-- replace the `author.email` value in `pbiviz.json` with a monitored support mailbox before submission
-- prepare AppSource submission assets
-  - offline sample `.pbix`
-  - screenshots
-  - privacy policy
-  - EULA
-  - support site
-  - 300x300 marketplace logo
-- address remaining recommended submission gaps if targeting a stronger review outcome
-  - allow interactions
-  - highlight data
-  - localization
+Report issues or request features on [GitHub Issues](https://github.com/Fred-Wu/sankeyVisual/issues).
