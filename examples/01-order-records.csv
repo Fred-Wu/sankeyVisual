@@ -1,0 +1,9 @@
+OrderID,Region,Channel,Product,Amount
+ORD001,East,Online,Product A,30
+ORD002,West,Retail,Product B,5
+ORD003,East,Retail,Product B,10
+ORD004,East,Online,Product A,25
+ORD005,East,Retail,Product B,15
+ORD006,West,Retail,Product B,15
+ORD007,East,Online,Product A,25
+ORD008,East,Retail,Product B,15
